@@ -15,9 +15,16 @@ import {
   Tooltip,
 } from "@mui/material";
 import { rewriteTextWithAI, type RewriteMode } from "./lib/aiClient";
-import { Copy, Check, RefreshCcw } from "lucide-react";
+import { Copy, Check, RefreshCcw, Settings as SettingsIcon } from "lucide-react";
+import { Settings } from "./components/Settings";
+
+type View = "main" | "settings";
+
+const STORAGE_KEY_INLINE_ENABLED = "inlineBubbleEnabled";
 
 function App() {
+  const [view, setView] = useState<View>("main");
+  const [inlineBubbleEnabled, setInlineBubbleEnabled] = useState(true);
   const [input, setInput] = useState("");
   const [mode, setMode] = useState<RewriteMode>("formal");
   const [output, setOutput] = useState("");
@@ -36,6 +43,39 @@ function App() {
       }
     };
   }, []);
+
+  // Load settings on mount
+  useEffect(() => {
+    if (chrome?.storage?.sync) {
+      chrome.storage.sync.get([STORAGE_KEY_INLINE_ENABLED], (result) => {
+        const enabled = result[STORAGE_KEY_INLINE_ENABLED] !== false; // default to true
+        setInlineBubbleEnabled(enabled);
+      });
+    }
+  }, []);
+
+  const handleToggleInlineBubble = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const enabled = event.target.checked;
+    setInlineBubbleEnabled(enabled);
+
+    if (chrome?.storage?.sync) {
+      chrome.storage.sync.set({ [STORAGE_KEY_INLINE_ENABLED]: enabled }, () => {
+        // Notify content scripts of the change
+        chrome.tabs.query({}, (tabs) => {
+          tabs.forEach((tab) => {
+            if (tab.id) {
+              chrome.tabs.sendMessage(tab.id, {
+                type: "INLINE_BUBBLE_SETTING_CHANGED",
+                enabled,
+              }).catch(() => {
+                // Ignore errors for tabs that don't have content script
+              });
+            }
+          });
+        });
+      });
+    }
+  };
 
   const handleUsePageSelection = () => {
     setSelectionStatus(null);
@@ -207,206 +247,235 @@ function App() {
               AI Text Rewriter
             </Typography>
             <Typography variant="h6" sx={{ lineHeight: 1.2, fontWeight: 600, fontSize: '1rem' }}>
-              Rewrite your text in one click
+              {view === "settings" ? "Settings" : "Rewrite your text in one click"}
             </Typography>
           </Box>
-          <Box
-            component="span"
-            sx={{
-              fontSize: '0.7rem',
-              px: 0.75,
-              py: 0.25,
-              borderRadius: '10px',
-              backgroundColor: 'success.main',
-              color: 'white',
-              fontWeight: 600,
-              alignSelf: 'flex-start',
-            }}
-          >
-            v1.0.0
-          </Box>
-        </Box>
-
-        {/* Mode selector */}
-        <Box sx={{ flexShrink: 0 }}>
-          <Typography variant="caption" sx={{ display: 'block', mb: 0.5, color: 'text.secondary', fontSize: '0.7rem' }}>
-            Tone / Action
-          </Typography>
-          <ToggleButtonGroup
-            size="small"
-            value={mode}
-            exclusive
-            onChange={handleModeChange}
-            fullWidth
-            sx={{ '& .MuiToggleButton-root': { fontSize: '0.7rem', py: 0.5 } }}
-          >
-            <ToggleButton value="formal">Formal</ToggleButton>
-            <ToggleButton value="friendly">Friendly</ToggleButton>
-            <ToggleButton value="shorter">Shorter</ToggleButton>
-            <ToggleButton value="longer">Longer</ToggleButton>
-            <ToggleButton value="fix">Fix grammar</ToggleButton>
-          </ToggleButtonGroup>
-        </Box>
-
-        {/* Input */}
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, flexShrink: 0 }}>
-          <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
-            Original text
-          </Typography>
-          <TextField
-            multiline
-            minRows={3}
-            maxRows={4}
-            variant="outlined"
-            placeholder="Paste or type your text here…"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            size="small"
-            fullWidth
-            InputProps={{
-              style: {
-                fontSize: 13,
-              },
-            }}
-          />
-        </Box>
-
-        {/* Actions */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexShrink: 0, flexWrap: 'wrap' }}>
-          <Button
-            variant="outlined"
-            size="small"
-            onClick={handleUsePageSelection}
-            disabled={loading}
-            sx={{ flexShrink: 0 }}
-          >
-            Use page selection
-          </Button>
-          <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem', flex: 1, minWidth: 0 }}>
-            {selectionStatus || "Select text in Gmail / any page, then click \"Use page selection\"."}
-          </Typography>
-        </Box>
-
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, flexShrink: 0 }}>
-          <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem', flex: 1 }}>
-            Paste or type your text above, then click Rewrite
-          </Typography>
-          <Button
-            variant="contained"
-            size="small"
-            onClick={handleRewrite}
-            disabled={disabled}
-            sx={{ flexShrink: 0, minWidth: 92 }}
-          >
-            {loading ? (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                <CircularProgress size={14} color="inherit" thickness={6} />
-                Working…
-              </Box>
-            ) : (
-              "Rewrite"
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            {view === "main" && (
+              <IconButton
+                size="small"
+                onClick={() => setView("settings")}
+                sx={{ color: 'text.secondary', p: 0.5 }}
+              >
+                <SettingsIcon size={16} />
+              </IconButton>
             )}
-          </Button>
-        </Box>
-
-        <Fade in={loading} unmountOnExit>
-          <Box
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 0.75,
-              fontSize: '0.7rem',
-              color: 'text.secondary',
-              flexShrink: 0,
-            }}
-          >
-            <CircularProgress size={12} thickness={8} />
-            Transforming your text…
-          </Box>
-        </Fade>
-
-        {/* Output */}
-        <Box sx={{
-          flex: 1,
-          minHeight: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-          gap: 0.5
-        }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, gap: 1, flexWrap: 'wrap' }}>
-            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem', flex: 1, minWidth: 120 }}>
-              Rewritten text
-            </Typography>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
-              <Tooltip title="Replace highlighted text on the page">
-                <span>
-                  <Button
-                    variant="contained"
-                    color="secondary"
-                    size="small"
-                    startIcon={<RefreshCcw size={14} />}
-                    onClick={handleReplaceSelection}
-                    disabled={!output.trim() || loading}
-                    sx={{
-                      textTransform: 'none',
-                      minWidth: 0,
-                      px: 1.25,
-                      py: 0.3,
-                      fontSize: '0.7rem',
-                      borderRadius: 999,
-                    }}
-                  >
-                    Apply to page
-                  </Button>
-                </span>
-              </Tooltip>
-              <Tooltip title={copied ? "Copied!" : "Copy to clipboard"}>
-                <span>
-                  <IconButton
-                    size="small"
-                    onClick={handleCopy}
-                    disabled={!output.trim()}
-                    sx={{ color: copied ? 'success.main' : 'text.secondary', p: 0.5 }}
-                  >
-                    {copied ? <Check size={16} /> : <Copy size={16} />}
-                  </IconButton>
-                </span>
-              </Tooltip>
+            {view === "settings" && (
+              <Button
+                size="small"
+                onClick={() => setView("main")}
+                sx={{ fontSize: '0.7rem', minWidth: 0, px: 1 }}
+              >
+                Back
+              </Button>
+            )}
+            <Box
+              component="span"
+              sx={{
+                fontSize: '0.7rem',
+                px: 0.75,
+                py: 0.25,
+                borderRadius: '10px',
+                backgroundColor: 'success.main',
+                color: 'white',
+                fontWeight: 600,
+                alignSelf: 'flex-start',
+              }}
+            >
+              v1.1.0
             </Box>
           </Box>
-          {error && (
-            <Alert severity="error" sx={{ fontSize: '0.75rem', py: 0.5, flexShrink: 0 }}>
-              {error}
-            </Alert>
-          )}
-          <Paper
-            variant="outlined"
-            sx={{
-              flex: 1,
-              overflow: 'auto',
-              backgroundColor: 'background.paper',
-              minHeight: 0,
-              maxHeight: '100%',
-              '& pre': {
-                margin: 0,
-                padding: 1,
-                fontSize: '0.75rem',
-                lineHeight: 1.4,
-                whiteSpace: 'pre-wrap',
-                color: 'text.primary',
-                fontFamily: 'inherit',
-              },
-            }}
-          >
-            <pre>{output || "Your rewritten text will appear here."}</pre>
-          </Paper>
-          {replaceStatus && (
-            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem', flexShrink: 0 }}>
-              {replaceStatus}
-            </Typography>
-          )}
         </Box>
+
+        {view === "settings" ? (
+          <Settings
+            inlineBubbleEnabled={inlineBubbleEnabled}
+            onToggleInlineBubble={handleToggleInlineBubble}
+          />
+        ) : (
+          <>
+            {/* Mode selector */}
+            <Box sx={{ flexShrink: 0 }}>
+              <Typography variant="caption" sx={{ display: 'block', mb: 0.5, color: 'text.secondary', fontSize: '0.7rem' }}>
+                Tone / Action
+              </Typography>
+              <ToggleButtonGroup
+                size="small"
+                value={mode}
+                exclusive
+                onChange={handleModeChange}
+                fullWidth
+                sx={{ '& .MuiToggleButton-root': { fontSize: '0.7rem', py: 0.5 } }}
+              >
+                <ToggleButton value="formal">Formal</ToggleButton>
+                <ToggleButton value="friendly">Friendly</ToggleButton>
+                <ToggleButton value="shorter">Shorter</ToggleButton>
+                <ToggleButton value="longer">Longer</ToggleButton>
+                <ToggleButton value="fix">Fix grammar</ToggleButton>
+              </ToggleButtonGroup>
+            </Box>
+
+            {/* Input */}
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, flexShrink: 0 }}>
+              <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
+                Original text
+              </Typography>
+              <TextField
+                multiline
+                minRows={3}
+                maxRows={4}
+                variant="outlined"
+                placeholder="Paste or type your text here…"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                size="small"
+                fullWidth
+                InputProps={{
+                  style: {
+                    fontSize: 13,
+                  },
+                }}
+              />
+            </Box>
+
+            {/* Actions */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexShrink: 0, flexWrap: 'wrap' }}>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={handleUsePageSelection}
+                disabled={loading}
+                sx={{ flexShrink: 0 }}
+              >
+                Use page selection
+              </Button>
+              <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem', flex: 1, minWidth: 0 }}>
+                {selectionStatus || "Select text in Gmail / any page, then click \"Use page selection\"."}
+              </Typography>
+            </Box>
+
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, flexShrink: 0 }}>
+              <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem', flex: 1 }}>
+                Paste or type your text above, then click Rewrite
+              </Typography>
+              <Button
+                variant="contained"
+                size="small"
+                onClick={handleRewrite}
+                disabled={disabled}
+                sx={{ flexShrink: 0, minWidth: 92 }}
+              >
+                {loading ? (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                    <CircularProgress size={14} color="inherit" thickness={6} />
+                    Working…
+                  </Box>
+                ) : (
+                  "Rewrite"
+                )}
+              </Button>
+            </Box>
+
+            <Fade in={loading} unmountOnExit>
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 0.75,
+                  fontSize: '0.7rem',
+                  color: 'text.secondary',
+                  flexShrink: 0,
+                }}
+              >
+                <CircularProgress size={12} thickness={8} />
+                Transforming your text…
+              </Box>
+            </Fade>
+
+            {/* Output */}
+            <Box sx={{
+              flex: 1,
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              gap: 0.5
+            }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, gap: 1, flexWrap: 'wrap' }}>
+                <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem', flex: 1, minWidth: 120 }}>
+                  Rewritten text
+                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                  <Tooltip title="Replace highlighted text on the page">
+                    <span>
+                      <Button
+                        variant="contained"
+                        color="secondary"
+                        size="small"
+                        startIcon={<RefreshCcw size={14} />}
+                        onClick={handleReplaceSelection}
+                        disabled={!output.trim() || loading}
+                        sx={{
+                          textTransform: 'none',
+                          minWidth: 0,
+                          px: 1.25,
+                          py: 0.3,
+                          fontSize: '0.7rem',
+                          borderRadius: 999,
+                        }}
+                      >
+                        Apply to page
+                      </Button>
+                    </span>
+                  </Tooltip>
+                  <Tooltip title={copied ? "Copied!" : "Copy to clipboard"}>
+                    <span>
+                      <IconButton
+                        size="small"
+                        onClick={handleCopy}
+                        disabled={!output.trim()}
+                        sx={{ color: copied ? 'success.main' : 'text.secondary', p: 0.5 }}
+                      >
+                        {copied ? <Check size={16} /> : <Copy size={16} />}
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                </Box>
+              </Box>
+              {error && (
+                <Alert severity="error" sx={{ fontSize: '0.75rem', py: 0.5, flexShrink: 0 }}>
+                  {error}
+                </Alert>
+              )}
+              <Paper
+                variant="outlined"
+                sx={{
+                  flex: 1,
+                  overflow: 'auto',
+                  backgroundColor: 'background.paper',
+                  minHeight: 0,
+                  maxHeight: '100%',
+                  '& pre': {
+                    margin: 0,
+                    padding: 1,
+                    fontSize: '0.75rem',
+                    lineHeight: 1.4,
+                    whiteSpace: 'pre-wrap',
+                    color: 'text.primary',
+                    fontFamily: 'inherit',
+                  },
+                }}
+              >
+                <pre>{output || "Your rewritten text will appear here."}</pre>
+              </Paper>
+              {replaceStatus && (
+                <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem', flexShrink: 0 }}>
+                  {replaceStatus}
+                </Typography>
+              )}
+            </Box>
+          </>
+        )}
       </Box>
     </Box>
   );
