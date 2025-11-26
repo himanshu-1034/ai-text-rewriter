@@ -16,6 +16,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         contentScript: resolve(__dirname, "src/content-script.ts"),
+        background: resolve(__dirname, "src/background.ts"),
       },
       output: {
         // Ensure all assets are properly referenced
@@ -24,7 +25,10 @@ export default defineConfig({
         entryFileNames: (chunk) =>
           chunk.name === "contentScript"
             ? "content-script.js"
+            : chunk.name === "background"
+              ? "background.js"
             : "assets/[name]-[hash].js",
+        manualChunks: undefined,
       },
     },
     // Ensure assets are bundled properly
