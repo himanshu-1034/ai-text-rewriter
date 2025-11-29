@@ -31,6 +31,35 @@ The extension follows Chrome Extension Manifest V3 architecture with three main 
 
 ## File Structure & Responsibilities
 
+### Project Structure
+```
+src/
+├── App.tsx                    # Main popup orchestrator component
+├── main.tsx                   # React entry point
+├── constants.ts               # Shared constants (storage keys, version)
+├── theme.ts                   # MUI theme configuration
+├── index.css                  # Global styles
+├── envs.ts                    # Environment variable access
+├── background.ts              # Background service worker
+├── content-script.ts          # Inline popup content script
+├── components/                # React UI components
+│   ├── Settings.tsx
+│   ├── Header.tsx
+│   ├── ModeSelector.tsx
+│   ├── InputSection.tsx
+│   ├── PageSelectionButton.tsx
+│   ├── RewriteButton.tsx
+│   ├── LoadingIndicator.tsx
+│   └── OutputSection.tsx
+├── hooks/                     # Custom React hooks
+│   ├── useSettings.ts
+│   ├── useClipboard.ts
+│   ├── usePageSelection.ts
+│   └── useTextReplacement.ts
+└── lib/                       # Utility libraries
+    └── aiClient.ts            # Gemini API client
+```
+
 ### Core Files
 
 #### `src/main.tsx`
@@ -41,12 +70,11 @@ The extension follows Chrome Extension Manifest V3 architecture with three main 
   - Loads Roboto font weights
 
 #### `src/App.tsx`
-- **Purpose**: Main popup interface component
+- **Purpose**: Main popup interface component (orchestrator)
 - **Responsibilities**:
   - Manages view state (main vs settings)
-  - Handles user input and rewrite requests
-  - Coordinates with content script for page selection
-  - Manages UI state (loading, errors, copy status)
+  - Coordinates UI components and custom hooks
+  - Handles rewrite logic (calls AI client directly)
 - **Key State**:
   - `view`: "main" | "settings"
   - `input`, `output`: Text state
@@ -54,8 +82,61 @@ The extension follows Chrome Extension Manifest V3 architecture with three main 
   - `loading`, `error`: Async state
 - **Key Functions**:
   - `handleRewrite()`: Calls AI client directly (popup has access to modules)
-  - `handleUsePageSelection()`: Sends message to content script
-  - `handleReplaceSelection()`: Sends message to content script
+  - Composes custom hooks for settings, clipboard, page selection, and text replacement
+- **Note**: Refactored in v1.1.1 to use extracted hooks and components for better maintainability
+
+#### `src/constants.ts`
+- **Purpose**: Shared constants and configuration
+- **Responsibilities**:
+  - Centralizes storage keys (e.g., `STORAGE_KEY_INLINE_ENABLED`)
+  - Defines application version (`APP_VERSION`)
+- **Benefits**: Single source of truth for constants used across the application
+
+### Custom Hooks
+
+#### `src/hooks/useSettings.ts`
+- **Purpose**: Settings management hook
+- **Responsibilities**:
+  - Loads inline bubble setting from `chrome.storage.sync`
+  - Provides `handleToggleInlineBubble` function to update setting
+  - Broadcasts setting changes to all content scripts
+- **Returns**:
+  - `inlineBubbleEnabled`: Current setting value
+  - `handleToggleInlineBubble`: Change handler
+
+#### `src/hooks/useClipboard.ts`
+- **Purpose**: Clipboard copy functionality hook
+- **Responsibilities**:
+  - Manages copy-to-clipboard state (`copied` flag)
+  - Handles clipboard write operations
+  - Auto-resets `copied` flag after 1.5 seconds
+- **Returns**:
+  - `copied`: Boolean indicating if text was recently copied
+  - `copyToClipboard(text)`: Function to copy text to clipboard
+
+#### `src/hooks/usePageSelection.ts`
+- **Purpose**: Page selection capture hook
+- **Responsibilities**:
+  - Communicates with content script to get selected text
+  - Manages selection status messages
+  - Handles Chrome tabs API communication
+- **Returns**:
+  - `selectionStatus`: Status message string or null
+  - `getPageSelection()`: Async function to fetch selection from active tab
+  - `clearSelectionStatus()`: Function to clear status
+
+#### `src/hooks/useTextReplacement.ts`
+- **Purpose**: Text replacement on page hook
+- **Responsibilities**:
+  - Sends replacement messages to content script
+  - Manages replacement status feedback
+  - Handles Chrome tabs API communication
+- **Returns**:
+  - `replaceStatus`: Status message string or null
+  - `replaceSelection(text)`: Async function to replace selection on page
+  - `clearReplaceStatus()`: Function to clear status
+
+### UI Components
 
 #### `src/components/Settings.tsx`
 - **Purpose**: Settings page component
@@ -63,6 +144,59 @@ The extension follows Chrome Extension Manifest V3 architecture with three main 
   - Renders settings UI (currently just inline popup toggle)
   - Receives props for setting values and change handlers
 - **Note**: Modular component for easy extension with more settings
+
+#### `src/components/Header.tsx`
+- **Purpose**: Popup header component
+- **Responsibilities**:
+  - Displays application title and subtitle
+  - Shows version badge
+  - Renders settings icon button (main view) or back button (settings view)
+  - Handles view navigation
+
+#### `src/components/ModeSelector.tsx`
+- **Purpose**: Rewrite mode/tone selector component
+- **Responsibilities**:
+  - Renders toggle button group for rewrite modes
+  - Displays available modes: formal, friendly, shorter, longer, fix grammar
+  - Handles mode selection changes
+
+#### `src/components/InputSection.tsx`
+- **Purpose**: Text input field component
+- **Responsibilities**:
+  - Renders multiline text field for original text
+  - Manages input value and onChange events
+  - Handles disabled state during loading
+
+#### `src/components/PageSelectionButton.tsx`
+- **Purpose**: Page selection button with status display
+- **Responsibilities**:
+  - Renders "Use page selection" button
+  - Displays selection status message or placeholder text
+  - Handles button click to fetch selection from page
+
+#### `src/components/RewriteButton.tsx`
+- **Purpose**: Rewrite action button component
+- **Responsibilities**:
+  - Renders primary "Rewrite" button
+  - Shows loading state with spinner and "Working…" text
+  - Displays helper text above button
+  - Handles disabled state
+
+#### `src/components/LoadingIndicator.tsx`
+- **Purpose**: Loading progress indicator
+- **Responsibilities**:
+  - Displays loading spinner with "Transforming your text…" message
+  - Fades in/out based on loading state
+  - Provides visual feedback during AI processing
+
+#### `src/components/OutputSection.tsx`
+- **Purpose**: Output display and action panel
+- **Responsibilities**:
+  - Displays rewritten text in scrollable paper component
+  - Shows error alerts when present
+  - Renders copy and replace action buttons
+  - Displays replacement status messages
+  - Handles empty state placeholder
 
 ### Background Service Worker
 
@@ -328,21 +462,31 @@ The extension handles two types of selections:
 ## Adding New Features
 
 ### Adding a New Setting
-1. Add key to `STORAGE_KEY_*` constants in `App.tsx`
-2. Add UI control in `components/Settings.tsx`
-3. Add state management and storage sync
+1. Add key to `STORAGE_KEY_*` constants in `src/constants.ts`
+2. Update `useSettings` hook to manage new setting
+3. Add UI control in `components/Settings.tsx`
 4. Update content script to listen for changes
 
 ### Adding a New Rewrite Mode
 1. Update `RewriteMode` type in `src/lib/aiClient.ts`
 2. Add prompt to `MODE_PROMPTS` object
-3. Add toggle button in `App.tsx` and content script popup
+3. Add toggle button in `components/ModeSelector.tsx` and content script popup
 
 ### Modifying Inline Popup
 - Edit `src/content-script.ts`
 - Update `renderBubble()` for UI changes
 - Modify `bubbleState` type for new state
+- Ensure dropdown/select elements have proper color styling (fixed in v1.1.1)
 - Test across different websites (CSS isolation)
+
+### Code Organization Best Practices
+- **Custom Hooks**: Extract reusable stateful logic into hooks (see `src/hooks/`)
+- **Components**: Keep components focused and single-purpose (see `src/components/`)
+- **Constants**: Centralize shared constants in `src/constants.ts`
+- **Separation of Concerns**: 
+  - UI components handle presentation
+  - Hooks handle business logic and side effects
+  - Main App component orchestrates and composes everything
 
 ## Dependencies
 

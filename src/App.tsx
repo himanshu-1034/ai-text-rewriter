@@ -1,132 +1,41 @@
 // src/App.tsx
-import { useEffect, useRef, useState } from "react";
-import {
-  TextField,
-  Button,
-  ToggleButton,
-  ToggleButtonGroup,
-  Typography,
-  Paper,
-  Box,
-  Alert,
-  CircularProgress,
-  Fade,
-  IconButton,
-  Tooltip,
-} from "@mui/material";
+import { useState } from "react";
+import { Box } from "@mui/material";
 import { rewriteTextWithAI, type RewriteMode } from "./lib/aiClient";
-import { Copy, Check, RefreshCcw, Settings as SettingsIcon } from "lucide-react";
 import { Settings } from "./components/Settings";
+import { Header } from "./components/Header";
+import { ModeSelector } from "./components/ModeSelector";
+import { InputSection } from "./components/InputSection";
+import { PageSelectionButton } from "./components/PageSelectionButton";
+import { RewriteButton } from "./components/RewriteButton";
+import { LoadingIndicator } from "./components/LoadingIndicator";
+import { OutputSection } from "./components/OutputSection";
+import { useSettings } from "./hooks/useSettings";
+import { useClipboard } from "./hooks/useClipboard";
+import { usePageSelection } from "./hooks/usePageSelection";
+import { useTextReplacement } from "./hooks/useTextReplacement";
 
 type View = "main" | "settings";
 
-const STORAGE_KEY_INLINE_ENABLED = "inlineBubbleEnabled";
-
 function App() {
   const [view, setView] = useState<View>("main");
-  const [inlineBubbleEnabled, setInlineBubbleEnabled] = useState(true);
   const [input, setInput] = useState("");
   const [mode, setMode] = useState<RewriteMode>("formal");
   const [output, setOutput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const copyTimeoutRef = useRef<number | null>(null);
-  const [selectionStatus, setSelectionStatus] = useState<string | null>(null);
-  const [replaceStatus, setReplaceStatus] = useState<string | null>(null);
 
+  const { inlineBubbleEnabled, handleToggleInlineBubble } = useSettings();
+  const { copied, copyToClipboard } = useClipboard();
+  const { selectionStatus, getPageSelection, clearSelectionStatus } = usePageSelection();
+  const { replaceStatus, replaceSelection, clearReplaceStatus } = useTextReplacement();
 
-  useEffect(() => {
-    return () => {
-      if (copyTimeoutRef.current) {
-        clearTimeout(copyTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  // Load settings on mount
-  useEffect(() => {
-    if (chrome?.storage?.sync) {
-      chrome.storage.sync.get([STORAGE_KEY_INLINE_ENABLED], (result) => {
-        const enabled = result[STORAGE_KEY_INLINE_ENABLED] !== false; // default to true
-        setInlineBubbleEnabled(enabled);
-      });
-    }
-  }, []);
-
-  const handleToggleInlineBubble = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const enabled = event.target.checked;
-    setInlineBubbleEnabled(enabled);
-
-    if (chrome?.storage?.sync) {
-      chrome.storage.sync.set({ [STORAGE_KEY_INLINE_ENABLED]: enabled }, () => {
-        // Notify content scripts of the change
-        chrome.tabs.query({}, (tabs) => {
-          tabs.forEach((tab) => {
-            if (tab.id) {
-              chrome.tabs.sendMessage(tab.id, {
-                type: "INLINE_BUBBLE_SETTING_CHANGED",
-                enabled,
-              }).catch(() => {
-                // Ignore errors for tabs that don't have content script
-              });
-            }
-          });
-        });
-      });
-    }
-  };
-
-  const handleUsePageSelection = () => {
-    setSelectionStatus(null);
-    setReplaceStatus(null);
-
-    if (!chrome?.tabs) {
-      setSelectionStatus("Chrome tabs API unavailable.");
-      return;
-    }
-
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const tab = tabs[0];
-      if (!tab || tab.id === undefined) {
-        setSelectionStatus("No active tab found.");
-        return;
-      }
-
-      chrome.tabs.sendMessage(
-        tab.id,
-        { type: "GET_SELECTION" },
-        (response) => {
-          const lastError = chrome.runtime.lastError;
-          if (lastError) {
-            console.warn("sendMessage error:", lastError.message);
-            setSelectionStatus("Could not read selection on this page.");
-            return;
-          }
-
-          if (!response || typeof response.text !== "string") {
-            setSelectionStatus("No selection detected.");
-            return;
-          }
-
-          if (!response.text.trim()) {
-            setSelectionStatus("Please select some text first.");
-            return;
-          }
-
-          setInput(response.text);
-          setSelectionStatus("Selected text imported from page ✅");
-        }
-      );
-    });
-  };
-
-  const handleModeChange = (
-    _event: React.MouseEvent<HTMLElement>,
-    newMode: RewriteMode | null
-  ) => {
-    if (newMode !== null) {
-      setMode(newMode);
+  const handleUsePageSelection = async () => {
+    clearSelectionStatus();
+    clearReplaceStatus();
+    const text = await getPageSelection();
+    if (text) {
+      setInput(text);
     }
   };
 
@@ -136,7 +45,7 @@ function App() {
     setLoading(true);
     setOutput("");
     setError(null);
-    setReplaceStatus(null);
+    clearReplaceStatus();
 
     try {
       const result = await rewriteTextWithAI(input.trim(), mode);
@@ -151,61 +60,12 @@ function App() {
     }
   };
 
-  const handleCopy = async () => {
-    if (!output.trim()) return;
-
-    try {
-      await navigator.clipboard.writeText(output);
-      setCopied(true);
-      if (copyTimeoutRef.current) {
-        clearTimeout(copyTimeoutRef.current);
-      }
-      copyTimeoutRef.current = window.setTimeout(() => setCopied(false), 1500);
-    } catch (copyError) {
-      console.error("Failed to copy rewritten text:", copyError);
-    }
+  const handleCopy = () => {
+    copyToClipboard(output);
   };
 
-  const handleReplaceSelection = () => {
-    if (!output.trim()) {
-      setReplaceStatus("Rewrite something first.");
-      return;
-    }
-
-    setReplaceStatus("Applying rewrite to page…");
-
-    if (!chrome?.tabs) {
-      setReplaceStatus("Chrome tabs API unavailable.");
-      return;
-    }
-
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const tab = tabs[0];
-      if (!tab || tab.id === undefined) {
-        setReplaceStatus("No active tab found.");
-        return;
-      }
-
-      chrome.tabs.sendMessage(
-        tab.id,
-        { type: "REPLACE_SELECTION", newText: output },
-        (response) => {
-          const lastError = chrome.runtime.lastError;
-          if (lastError) {
-            console.warn("sendMessage error:", lastError.message);
-            setReplaceStatus("Could not replace text on this page.");
-            return;
-          }
-
-          if (!response?.ok) {
-            setReplaceStatus(response?.error || "No selection to replace. Use “Use page selection” first.");
-            return;
-          }
-
-          setReplaceStatus("Replaced selection on page ✅");
-        }
-      );
-    });
+  const handleReplaceSelection = async () => {
+    await replaceSelection(output);
   };
 
   const disabled = !input.trim() || loading;
@@ -231,61 +91,7 @@ function App() {
         overflow: 'hidden',
         boxSizing: 'border-box'
       }}>
-        {/* Header */}
-        <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexShrink: 0, mb: 0.5 }}>
-          <Box>
-            <Typography
-              variant="subtitle2"
-              sx={{
-                textTransform: 'uppercase',
-                letterSpacing: '0.1em',
-                color: 'text.secondary',
-                mb: 0.25,
-                fontSize: '0.7rem',
-              }}
-            >
-              AI Text Rewriter
-            </Typography>
-            <Typography variant="h6" sx={{ lineHeight: 1.2, fontWeight: 600, fontSize: '1rem' }}>
-              {view === "settings" ? "Settings" : "Rewrite your text in one click"}
-            </Typography>
-          </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            {view === "main" && (
-              <IconButton
-                size="small"
-                onClick={() => setView("settings")}
-                sx={{ color: 'text.secondary', p: 0.5 }}
-              >
-                <SettingsIcon size={16} />
-              </IconButton>
-            )}
-            {view === "settings" && (
-              <Button
-                size="small"
-                onClick={() => setView("main")}
-                sx={{ fontSize: '0.7rem', minWidth: 0, px: 1 }}
-              >
-                Back
-              </Button>
-            )}
-            <Box
-              component="span"
-              sx={{
-                fontSize: '0.7rem',
-                px: 0.75,
-                py: 0.25,
-                borderRadius: '10px',
-                backgroundColor: 'success.main',
-                color: 'white',
-                fontWeight: 600,
-                alignSelf: 'flex-start',
-              }}
-            >
-              v1.1.0
-            </Box>
-          </Box>
-        </Box>
+        <Header view={view} onViewChange={setView} />
 
         {view === "settings" ? (
           <Settings
@@ -294,186 +100,33 @@ function App() {
           />
         ) : (
           <>
-            {/* Mode selector */}
-            <Box sx={{ flexShrink: 0 }}>
-              <Typography variant="caption" sx={{ display: 'block', mb: 0.5, color: 'text.secondary', fontSize: '0.7rem' }}>
-                Tone / Action
-              </Typography>
-              <ToggleButtonGroup
-                size="small"
-                value={mode}
-                exclusive
-                onChange={handleModeChange}
-                fullWidth
-                sx={{ '& .MuiToggleButton-root': { fontSize: '0.7rem', py: 0.5 } }}
-              >
-                <ToggleButton value="formal">Formal</ToggleButton>
-                <ToggleButton value="friendly">Friendly</ToggleButton>
-                <ToggleButton value="shorter">Shorter</ToggleButton>
-                <ToggleButton value="longer">Longer</ToggleButton>
-                <ToggleButton value="fix">Fix grammar</ToggleButton>
-              </ToggleButtonGroup>
-            </Box>
+            <ModeSelector mode={mode} onModeChange={setMode} disabled={loading} />
 
-            {/* Input */}
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, flexShrink: 0 }}>
-              <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
-                Original text
-              </Typography>
-              <TextField
-                multiline
-                minRows={3}
-                maxRows={4}
-                variant="outlined"
-                placeholder="Paste or type your text here…"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                size="small"
-                fullWidth
-                InputProps={{
-                  style: {
-                    fontSize: 13,
-                  },
-                }}
-              />
-            </Box>
+            <InputSection value={input} onChange={setInput} disabled={loading} />
 
-            {/* Actions */}
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexShrink: 0, flexWrap: 'wrap' }}>
-              <Button
-                variant="outlined"
-                size="small"
-                onClick={handleUsePageSelection}
-                disabled={loading}
-                sx={{ flexShrink: 0 }}
-              >
-                Use page selection
-              </Button>
-              <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem', flex: 1, minWidth: 0 }}>
-                {selectionStatus || "Select text in Gmail / any page, then click \"Use page selection\"."}
-              </Typography>
-            </Box>
+            <PageSelectionButton
+              onSelect={handleUsePageSelection}
+              status={selectionStatus}
+              disabled={loading}
+            />
 
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, flexShrink: 0 }}>
-              <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem', flex: 1 }}>
-                Paste or type your text above, then click Rewrite
-              </Typography>
-              <Button
-                variant="contained"
-                size="small"
-                onClick={handleRewrite}
-                disabled={disabled}
-                sx={{ flexShrink: 0, minWidth: 92 }}
-              >
-                {loading ? (
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                    <CircularProgress size={14} color="inherit" thickness={6} />
-                    Working…
-                  </Box>
-                ) : (
-                  "Rewrite"
-                )}
-              </Button>
-            </Box>
+            <RewriteButton
+              onClick={handleRewrite}
+              loading={loading}
+              disabled={disabled}
+            />
 
-            <Fade in={loading} unmountOnExit>
-              <Box
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 0.75,
-                  fontSize: '0.7rem',
-                  color: 'text.secondary',
-                  flexShrink: 0,
-                }}
-              >
-                <CircularProgress size={12} thickness={8} />
-                Transforming your text…
-              </Box>
-            </Fade>
+            <LoadingIndicator loading={loading} />
 
-            {/* Output */}
-            <Box sx={{
-              flex: 1,
-              minHeight: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden',
-              gap: 0.5
-            }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, gap: 1, flexWrap: 'wrap' }}>
-                <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem', flex: 1, minWidth: 120 }}>
-                  Rewritten text
-                </Typography>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
-                  <Tooltip title="Replace highlighted text on the page">
-                    <span>
-                      <Button
-                        variant="contained"
-                        color="secondary"
-                        size="small"
-                        startIcon={<RefreshCcw size={14} />}
-                        onClick={handleReplaceSelection}
-                        disabled={!output.trim() || loading}
-                        sx={{
-                          textTransform: 'none',
-                          minWidth: 0,
-                          px: 1.25,
-                          py: 0.3,
-                          fontSize: '0.7rem',
-                          borderRadius: 999,
-                        }}
-                      >
-                        Apply to page
-                      </Button>
-                    </span>
-                  </Tooltip>
-                  <Tooltip title={copied ? "Copied!" : "Copy to clipboard"}>
-                    <span>
-                      <IconButton
-                        size="small"
-                        onClick={handleCopy}
-                        disabled={!output.trim()}
-                        sx={{ color: copied ? 'success.main' : 'text.secondary', p: 0.5 }}
-                      >
-                        {copied ? <Check size={16} /> : <Copy size={16} />}
-                      </IconButton>
-                    </span>
-                  </Tooltip>
-                </Box>
-              </Box>
-              {error && (
-                <Alert severity="error" sx={{ fontSize: '0.75rem', py: 0.5, flexShrink: 0 }}>
-                  {error}
-                </Alert>
-              )}
-              <Paper
-                variant="outlined"
-                sx={{
-                  flex: 1,
-                  overflow: 'auto',
-                  backgroundColor: 'background.paper',
-                  minHeight: 0,
-                  maxHeight: '100%',
-                  '& pre': {
-                    margin: 0,
-                    padding: 1,
-                    fontSize: '0.75rem',
-                    lineHeight: 1.4,
-                    whiteSpace: 'pre-wrap',
-                    color: 'text.primary',
-                    fontFamily: 'inherit',
-                  },
-                }}
-              >
-                <pre>{output || "Your rewritten text will appear here."}</pre>
-              </Paper>
-              {replaceStatus && (
-                <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem', flexShrink: 0 }}>
-                  {replaceStatus}
-                </Typography>
-              )}
-            </Box>
+            <OutputSection
+              output={output}
+              error={error}
+              replaceStatus={replaceStatus}
+              copied={copied}
+              loading={loading}
+              onCopy={handleCopy}
+              onReplace={handleReplaceSelection}
+            />
           </>
         )}
       </Box>
