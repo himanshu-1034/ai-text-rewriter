@@ -130,7 +130,18 @@ function renderBubble() {
         border-radius: 8px;
         border: 1px solid #d1d5db;
         background: #fff;
+        color: #111827;
         font-size: 0.8rem;
+        cursor: pointer;
+      }
+      select option {
+        background: #fff;
+        color: #111827;
+        padding: 4px;
+      }
+      select:focus {
+        outline: 2px solid #4f46e5;
+        outline-offset: 2px;
       }
       button.rewrite {
         margin-top: 10px;

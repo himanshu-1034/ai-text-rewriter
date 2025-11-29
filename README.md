@@ -125,7 +125,15 @@ Load the extension:
 - Chrome Extensions MV3 APIs
 
 ### Version
-**Current version: v1.1.0**
+**Current version: v1.1.1**
+
+#### v1.1.1 Changes
+- 🏗️ **Major refactoring**: Extracted common hooks and components for better code organization
+  - Created custom hooks: `useSettings`, `useClipboard`, `usePageSelection`, `useTextReplacement`
+  - Extracted UI components: `Header`, `ModeSelector`, `InputSection`, `PageSelectionButton`, `RewriteButton`, `LoadingIndicator`, `OutputSection`
+  - Added `constants.ts` for centralized configuration
+- 🐛 Fixed dropdown text visibility in inline popup (white text now visible on white background)
+- 📝 Updated developer documentation with new architecture and file structure
 
 #### v1.1.0 Changes
 - ✨ Added inline popup feature that appears when selecting text on any webpage
@@ -145,15 +153,28 @@ Load the extension:
 ### Project Structure
 ```
 src/
-├── App.tsx              # Main popup component
-├── components/
-│   └── Settings.tsx     # Settings page component
-├── lib/
-│   └── aiClient.ts      # Gemini API client
-├── content-script.ts    # Inline popup logic (injected on all pages)
-├── background.ts        # Service worker for API calls
-├── theme.ts             # MUI theme configuration
-└── main.tsx             # React entry point
+├── App.tsx                    # Main popup orchestrator component
+├── main.tsx                   # React entry point
+├── constants.ts               # Shared constants (storage keys, version)
+├── theme.ts                   # MUI theme configuration
+├── background.ts              # Service worker for API calls
+├── content-script.ts          # Inline popup logic (injected on all pages)
+├── components/                # React UI components
+│   ├── Settings.tsx           # Settings page component
+│   ├── Header.tsx             # Popup header with navigation
+│   ├── ModeSelector.tsx       # Rewrite mode/tone selector
+│   ├── InputSection.tsx       # Text input field
+│   ├── PageSelectionButton.tsx # Page selection button with status
+│   ├── RewriteButton.tsx      # Rewrite action button
+│   ├── LoadingIndicator.tsx   # Loading progress indicator
+│   └── OutputSection.tsx      # Output display and actions
+├── hooks/                     # Custom React hooks
+│   ├── useSettings.ts         # Settings management hook
+│   ├── useClipboard.ts        # Clipboard copy functionality
+│   ├── usePageSelection.ts    # Page selection capture
+│   └── useTextReplacement.ts  # Text replacement on page
+└── lib/                       # Utility libraries
+    └── aiClient.ts            # Gemini API client
 ```
 
 ### Notes

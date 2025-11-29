@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "AI Email / Text Rewriter",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "description": "Rewrite emails and messages using AI.",
     "action": {
         "default_popup": "index.html",
